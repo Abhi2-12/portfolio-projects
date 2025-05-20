@@ -4,95 +4,135 @@ namespace App\Http\Controllers;
 
 use App\Models\Project;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ProjectController extends Controller
 {
+    // Display all projects
     public function index()
     {
-        $projects = Project::all();
+        $projects = Project::latest()->get();
         return view('projects.index', compact('projects'));
     }
 
+    // Show create form
     public function create()
     {
-        return view('projects.create');
+        return view('projects.create', [
+            'statuses' => ['draft' => 'Draft', 'published' => 'Published']
+        ]);
     }
 
+    // Store new project
     public function store(Request $request)
     {
-        $request->validate([
-            'title' => 'required|max:255',
+        $validated = $request->validate([
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'project_url' => 'nullable|url',
             'image' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'status' => 'required|in:draft,published',
         ]);
 
-        $imageName = time().'.'.$request->image->extension();  
-        $request->image->move(public_path('images'), $imageName);
+        try {
+            // Store image
+            $imagePath = $request->file('image')->store('project-images', 'public');
+            
+            // Create project
+            Project::create([
+                'title' => $validated['title'],
+                'description' => $validated['description'],
+                'project_url' => $validated['project_url'],
+                'image' => $imagePath,
+                'status' => $validated['status'],
+            ]);
 
-        Project::create([
-            'title' => $request->title,
-            'description' => $request->description,
-            'project_url' => $request->project_url,
-            'image' => $imageName,
-            'status' => $request->status ?? 'draft',
-        ]);
+            return redirect()->route('projects.index')
+                ->with('success', 'Project created successfully!');
 
-        return redirect()->route('projects.index')
-            ->with('success', 'Project created successfully.');
+        } catch (\Exception $e) {
+            // Delete uploaded file if error occurs
+            if (isset($imagePath)) {
+                Storage::disk('public')->delete($imagePath);
+            }
+
+            return back()->withInput()
+                ->with('error', 'Error: ' . $e->getMessage());
+        }
     }
 
+    // Show single project
     public function show(Project $project)
     {
         return view('projects.show', compact('project'));
     }
 
+    // Show edit form
     public function edit(Project $project)
     {
-        return view('projects.edit', compact('project'));
+        return view('projects.edit', [
+            'project' => $project,
+            'statuses' => ['draft' => 'Draft', 'published' => 'Published']
+        ]);
     }
 
-    public function update(Request $request, Project $project)
-    {
-        $request->validate([
-            'title' => 'required|max:255',
-        ]);
+    // Update project
+public function update(Request $request, Project $project)
+{
+    $validated = $request->validate([
+        'title' => 'required|string|max:255',
+        'description' => 'nullable|string',
+        'project_url' => 'nullable|url',
+        'image' => 'sometimes|image|mimes:jpeg,png,jpg,gif|max:2048',
+        'status' => 'required|in:draft,published',
+    ]);
 
+    try {
         $data = [
-            'title' => $request->title,
-            'description' => $request->description,
-            'project_url' => $request->project_url,
-            'status' => $request->status ?? 'draft',
+            'title' => $validated['title'],
+            'description' => $validated['description'],
+            'project_url' => $validated['project_url'],
+            'status' => $validated['status'],
         ];
 
         if ($request->hasFile('image')) {
-            $request->validate([
-                'image' => 'image|mimes:jpeg,png,jpg,gif|max:2048',
-            ]);
-            
+            $newImagePath = $request->file('image')->store('project-images', 'public');
+            $data['image'] = $newImagePath;
+
             // Delete old image
-            if (file_exists(public_path('images/' . $project->image))) {
-                unlink(public_path('images/' . $project->image));
+            if ($project->image) {
+                Storage::disk('public')->delete($project->image);
             }
-            
-            $imageName = time().'.'.$request->image->extension();  
-            $request->image->move(public_path('images'), $imageName);
-            $data['image'] = $imageName;
         }
 
+        // This is the key line - updates existing project
         $project->update($data);
 
         return redirect()->route('projects.index')
-            ->with('success', 'Project updated successfully');
-    }
+            ->with('success', 'Project updated successfully!');
 
+    } catch (\Exception $e) {
+        return back()->withInput()
+            ->with('error', 'Error: ' . $e->getMessage());
+    }
+}
+
+    // Delete project
     public function destroy(Project $project)
     {
-        if (file_exists(public_path('images/' . $project->image))) {
-            unlink(public_path('images/' . $project->image));
-        }
-        
-        $project->delete();
+        try {
+            // Delete associated image
+            if ($project->image) {
+                Storage::disk('public')->delete($project->image);
+            }
 
-        return redirect()->route('projects.index')
-            ->with('success', 'Project deleted successfully');
+            $project->delete();
+
+            return redirect()->route('projects.index')
+                ->with('success', 'Project deleted successfully!');
+
+        } catch (\Exception $e) {
+            return back()->with('error', 'Error: ' . $e->getMessage());
+        }
     }
 }

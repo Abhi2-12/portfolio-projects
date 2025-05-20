@@ -16,4 +16,10 @@ class Project extends Model
         'image',
         'status'
     ];
+
+    // Accessor for image URL
+    public function getImageUrlAttribute()
+    {
+        return asset('storage/' . $this->image);
+    }
 }
